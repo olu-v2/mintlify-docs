@@ -1,0 +1,344 @@
+---
+title: Downloading processed documents
+description: Learn how to download your optimized documents after processing completes
+---
+
+Once your document processing job is complete, you can download the optimized file using a presigned download URL.
+
+## Prerequisites
+
+Before downloading, ensure your job has completed successfully:
+
+<Steps>
+  <Step title="Check job status">
+    Verify the job status is `DONE` using the status endpoint
+  </Step>
+  <Step title="Request download URL">
+    Call the download endpoint to get a presigned URL
+  </Step>
+  <Step title="Download the file">
+    Use the presigned URL to download your optimized document
+  </Step>
+</Steps>
+
+<Warning>
+  The download endpoint only works for jobs with status `DONE`. If the job is still processing, you'll receive a 400 error.
+</Warning>
+
+## Request a download URL
+
+Send a GET request to `/api/download/:jobId`:
+
+```bash
+curl https://your-api.com/api/download/abc-123 \
+  -H "x-api-key: your-api-key"
+```
+
+### Response
+
+```json
+{
+  "downloadUrl": "https://s3.amazonaws.com/bucket/uploads/processed/abc-123_medium.pdf?signature=..."
+}
+```
+
+<Info>
+  The presigned download URL expires after 5 minutes (300 seconds). Download your file promptly after receiving the URL.
+</Info>
+
+## Download the file
+
+Use the `downloadUrl` to download your optimized document:
+
+```bash
+curl "https://s3.amazonaws.com/bucket/uploads/processed/abc-123_medium.pdf?signature=..." \
+  -o optimized-document.pdf
+```
+
+The downloaded file will be saved as `optimized-document.pdf` in your current directory.
+
+## Complete workflow example
+
+Here's a full example from upload to download:
+
+### JavaScript example
+
+```javascript
+const API_BASE = 'https://your-api.com/api';
+const API_KEY = 'your-api-key';
+
+async function optimizeAndDownload(file, optimizationLevel = 'medium') {
+  // Step 1: Get upload URL
+  const urlRes = await fetch(`${API_BASE}/upload-url`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': API_KEY
+    },
+    body: JSON.stringify({
+      contentType: file.type,
+      optimizationLevel
+    })
+  });
+  const { uploadUrl, key, jobId } = await urlRes.json();
+  
+  // Step 2: Upload file
+  await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type },
+    body: file
+  });
+  console.log('File uploaded');
+  
+  // Step 3: Start processing
+  await fetch(`${API_BASE}/process`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': API_KEY
+    },
+    body: JSON.stringify({ key, optimizationLevel, jobId })
+  });
+  console.log('Processing started');
+  
+  // Step 4: Wait for completion
+  let job;
+  while (true) {
+    const statusRes = await fetch(`${API_BASE}/status/${jobId}`, {
+      headers: { 'x-api-key': API_KEY }
+    });
+    job = await statusRes.json();
+    
+    if (job.status === 'DONE') {
+      console.log('Processing complete!');
+      break;
+    }
+    
+    if (job.status === 'ERROR') {
+      throw new Error(`Processing failed: ${job.errorMsg}`);
+    }
+    
+    // Wait 2 seconds before checking again
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  
+  // Step 5: Get download URL
+  const downloadRes = await fetch(`${API_BASE}/download/${jobId}`, {
+    headers: { 'x-api-key': API_KEY }
+  });
+  const { downloadUrl } = await downloadRes.json();
+  
+  // Step 6: Download the file
+  const fileRes = await fetch(downloadUrl);
+  const blob = await fileRes.blob();
+  
+  // Trigger browser download
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `optimized-${file.name}`;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+  
+  console.log('Download complete!');
+}
+
+// Usage
+const fileInput = document.getElementById('file');
+await optimizeAndDownload(fileInput.files[0], 'medium');
+```
+
+### Python example
+
+```python
+import requests
+import time
+
+API_BASE = 'https://your-api.com/api'
+API_KEY = 'your-api-key'
+
+def optimize_and_download(file_path, output_path, optimization_level='medium'):
+    headers = {'x-api-key': API_KEY}
+    
+    # Step 1: Get upload URL
+    url_res = requests.post(
+        f'{API_BASE}/upload-url',
+        headers=headers,
+        json={
+            'contentType': 'application/pdf',
+            'optimizationLevel': optimization_level
+        }
+    )
+    data = url_res.json()
+    upload_url = data['uploadUrl']
+    key = data['key']
+    job_id = data['jobId']
+    
+    # Step 2: Upload file
+    with open(file_path, 'rb') as f:
+        requests.put(
+            upload_url,
+            headers={'Content-Type': 'application/pdf'},
+            data=f
+        )
+    print('File uploaded')
+    
+    # Step 3: Start processing
+    requests.post(
+        f'{API_BASE}/process',
+        headers=headers,
+        json={'key': key, 'optimizationLevel': optimization_level, 'jobId': job_id}
+    )
+    print('Processing started')
+    
+    # Step 4: Wait for completion
+    while True:
+        status_res = requests.get(
+            f'{API_BASE}/status/{job_id}',
+            headers=headers
+        )
+        job = status_res.json()
+        
+        if job['status'] == 'DONE':
+            print('Processing complete!')
+            break
+        
+        if job['status'] == 'ERROR':
+            raise Exception(f"Processing failed: {job['errorMsg']}")
+        
+        # Wait 2 seconds before checking again
+        time.sleep(2)
+    
+    # Step 5: Get download URL
+    download_res = requests.get(
+        f'{API_BASE}/download/{job_id}',
+        headers=headers
+    )
+    download_url = download_res.json()['downloadUrl']
+    
+    # Step 6: Download the file
+    file_res = requests.get(download_url)
+    with open(output_path, 'wb') as f:
+        f.write(file_res.content)
+    
+    print(f'Download complete! Saved to {output_path}')
+
+# Usage
+optimize_and_download('document.pdf', 'optimized-document.pdf', 'medium')
+```
+
+## Error handling
+
+The download endpoint returns different status codes based on the job state:
+
+<ResponseField name="200" type="Success">
+  The download URL was generated successfully
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  The job is not ready yet. The response includes the current job status:
+  
+  ```json
+  {
+    "error": "File is not ready yet",
+    "status": "PENDING"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="404" type="Not Found">
+  The job ID doesn't exist:
+  
+  ```json
+  {
+    "error": "Job not found"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="500" type="Server Error">
+  Failed to generate the download URL. Retry after a short delay.
+</ResponseField>
+
+### Handling not ready errors
+
+```javascript
+async function getDownloadUrl(jobId) {
+  const response = await fetch(`${API_BASE}/download/${jobId}`, {
+    headers: { 'x-api-key': API_KEY }
+  });
+  
+  if (response.status === 400) {
+    const error = await response.json();
+    throw new Error(`File not ready. Current status: ${error.status}`);
+  }
+  
+  if (!response.ok) {
+    throw new Error(`Failed to get download URL: ${response.status}`);
+  }
+  
+  const { downloadUrl } = await response.json();
+  return downloadUrl;
+}
+
+try {
+  const downloadUrl = await getDownloadUrl('abc-123');
+  console.log('Download URL:', downloadUrl);
+} catch (error) {
+  console.error('Error:', error.message);
+}
+```
+
+## Output file naming
+
+The optimized files are stored with the following naming convention:
+
+```
+uploads/processed/{jobId}_{optimizationLevel}.pdf
+```
+
+For example, a job with ID `abc-123` and optimization level `medium` will be saved as:
+
+```
+uploads/processed/abc-123_medium.pdf
+```
+
+<Note>
+  The output file name includes the optimization level, making it easy to identify which optimization was applied.
+</Note>
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Check status before downloading">
+    Always verify the job status is `DONE` before requesting a download URL. This prevents unnecessary API calls and 400 errors.
+  </Accordion>
+  
+  <Accordion title="Handle URL expiration">
+    Download URLs expire after 5 minutes. If you need to download the file later, request a new download URL rather than storing the old one.
+  </Accordion>
+  
+  <Accordion title="Implement retry logic">
+    Network issues can occur during download. Implement retry logic with exponential backoff for production applications.
+  </Accordion>
+  
+  <Accordion title="Stream large files">
+    For large documents, consider streaming the download rather than loading the entire file into memory.
+  </Accordion>
+</AccordionGroup>
+
+## Related guides
+
+<CardGroup cols={3}>
+  <Card title="Upload documents" icon="upload" href="/guides/uploading-documents">
+    Learn how to upload documents
+  </Card>
+  <Card title="Start processing" icon="gear" href="/guides/processing-documents">
+    Initiate document optimization
+  </Card>
+  <Card title="Check status" icon="clock" href="/guides/checking-status">
+    Monitor job progress
+  </Card>
+</CardGroup>

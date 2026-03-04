@@ -1,0 +1,123 @@
+---
+title: 'Download'
+description: 'Download the optimized document'
+---
+
+## GET /api/download/:jobId
+
+Generates a pre-signed S3 download URL for the optimized document. This endpoint can only be called after the job status is `DONE`.
+
+<Warning>
+Only jobs with status `DONE` can be downloaded. Check the job status using `/api/status/:jobId` before calling this endpoint.
+</Warning>
+
+## Path Parameters
+
+<ParamField path="jobId" type="string" required>
+  The unique job identifier returned from the `/api/upload-url` endpoint.
+</ParamField>
+
+## Response
+
+<ResponseField name="downloadUrl" type="string">
+  Pre-signed S3 URL for downloading the optimized file. The URL is temporary and will expire after a set time period.
+</ResponseField>
+
+## Error Codes
+
+| Status Code | Error Message | Description |
+|-------------|---------------|-------------|
+| 404 | Job not found | No job exists with the provided job ID |
+| 400 | File is not ready yet | The job has not completed processing yet. Response includes current `status`. |
+| 500 | Failed to generate download URL | Server error occurred while generating the download URL |
+
+## Example Request
+
+```bash
+curl https://api.example.com/api/download/abc123-def456-ghi789 \
+  -H "x-api-key: your-api-key-here"
+```
+
+## Example Response (Success)
+
+```json
+{
+  "downloadUrl": "https://s3.amazonaws.com/bucket/optimized/abc123-document.pdf?signature=..."
+}
+```
+
+## Example Response (Not Ready)
+
+```json
+{
+  "error": "File is not ready yet",
+  "status": "PROCESSING"
+}
+```
+
+## Download the File
+
+After receiving the `downloadUrl`, download the file using a simple GET request:
+
+```bash
+curl -o optimized-document.pdf "https://s3.amazonaws.com/bucket/optimized/abc123-document.pdf?signature=..."
+```
+
+<Note>
+The pre-signed download URL expires after 5 minutes (300 seconds). If the URL expires, call this endpoint again to generate a new download URL.
+</Note>
+
+## Complete Workflow Example
+
+Here's a complete example of the entire document optimization workflow:
+
+```bash
+# Set your API key
+API_KEY="your-api-key-here"
+
+# Step 1: Get upload URL
+RESPONSE=$(curl -X POST https://api.example.com/api/upload-url \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d '{
+    "contentType": "application/pdf",
+    "optimizationLevel": "medium"
+  }')
+
+UPLOAD_URL=$(echo $RESPONSE | jq -r '.uploadUrl')
+KEY=$(echo $RESPONSE | jq -r '.key')
+JOB_ID=$(echo $RESPONSE | jq -r '.jobId')
+
+# Step 2: Upload file to S3
+curl -X PUT "$UPLOAD_URL" \
+  -H "Content-Type: application/pdf" \
+  --upload-file document.pdf
+
+# Step 3: Start processing
+curl -X POST https://api.example.com/api/process \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: $API_KEY" \
+  -d "{
+    \"key\": \"$KEY\",
+    \"optimizationLevel\": \"medium\",
+    \"jobId\": \"$JOB_ID\"
+  }"
+
+# Step 4: Poll for status
+while true; do
+  STATUS=$(curl https://api.example.com/api/status/$JOB_ID \
+    -H "x-api-key: $API_KEY" | jq -r '.status')
+  if [ "$STATUS" = "DONE" ]; then
+    break
+  elif [ "$STATUS" = "FAILED" ]; then
+    echo "Processing failed"
+    exit 1
+  fi
+  sleep 5
+done
+
+# Step 5: Download optimized file
+DOWNLOAD_URL=$(curl https://api.example.com/api/download/$JOB_ID \
+  -H "x-api-key: $API_KEY" | jq -r '.downloadUrl')
+curl -o optimized.pdf "$DOWNLOAD_URL"
+```

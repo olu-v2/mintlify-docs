@@ -1,0 +1,155 @@
+---
+title: Environment Variables
+description: Configure your Doc Optimizer Server with the required environment variables
+---
+
+The Doc Optimizer Server uses environment variables to configure AWS services and server behavior. You can set these in a `.env` file or through your deployment platform.
+
+## Required Variables
+
+These environment variables must be set for the server to function properly.
+
+<ParamField path="AWS_REGION" type="string" required>
+  The AWS region where your resources are deployed.
+  
+  ```bash
+  AWS_REGION=us-east-1
+  ```
+  
+  <Note>
+    All AWS services (S3, DynamoDB, Lambda) must be in the same region.
+  </Note>
+</ParamField>
+
+<ParamField path="S3_BUCKET" type="string" required>
+  The name of the S3 bucket used for storing original and processed documents.
+  
+  ```bash
+  S3_BUCKET=doc-optimizer-uploads
+  ```
+  
+  The server creates two prefixes:
+  - `uploads/original/` - Original uploaded files
+  - `uploads/processed/` - Optimized output files
+</ParamField>
+
+<ParamField path="DYNAMO_TABLE" type="string" required>
+  The DynamoDB table name for storing job metadata and status.
+  
+  ```bash
+  DYNAMO_TABLE=doc-optimizer-jobs
+  ```
+  
+  This table tracks processing jobs with their status, input/output keys, and optimization levels.
+</ParamField>
+
+<ParamField path="DYNAMO_KEYS_TABLE" type="string" required>
+  The DynamoDB table name for storing API key records.
+  
+  ```bash
+  DYNAMO_KEYS_TABLE=doc-optimizer-api-keys
+  ```
+  
+  This table manages API authentication with fields for:
+  - `apiKey` (partition key)
+  - `clientId`
+  - `active` (boolean)
+  - `expiresAt` (optional expiration date)
+</ParamField>
+
+<ParamField path="DYNAMO_USAGE_TABLE" type="string" required>
+  The DynamoDB table name for logging API usage metrics.
+  
+  ```bash
+  DYNAMO_USAGE_TABLE=doc-optimizer-usage
+  ```
+  
+  This table records each API request with client ID, endpoint, job ID, and timestamp.
+</ParamField>
+
+<ParamField path="LAMBDA_NAME" type="string" required>
+  The name of the Lambda function that processes document optimization.
+  
+  ```bash
+  LAMBDA_NAME=doc-optimizer-processor
+  ```
+  
+  <Warning>
+    If this variable is not set, the server will throw an error when attempting to process documents.
+  </Warning>
+</ParamField>
+
+## Optional Variables
+
+These variables have default values but can be customized.
+
+<ParamField path="PORT" type="number" default="5000">
+  The port number for local development.
+  
+  ```bash
+  PORT=3000
+  ```
+  
+  <Note>
+    This variable is only used when `NODE_ENV` is not set to `production`. In production, the server uses serverless-express.
+  </Note>
+</ParamField>
+
+<ParamField path="NODE_ENV" type="string" default="development">
+  The environment mode for the application.
+  
+  ```bash
+  NODE_ENV=production
+  ```
+  
+  Set to `production` when deploying to AWS Lambda to disable local server mode.
+</ParamField>
+
+## AWS Credentials
+
+<Warning>
+  Do not store AWS credentials in environment variables when deploying to AWS Lambda. Use IAM roles instead.
+</Warning>
+
+The AWS SDK automatically uses credentials from:
+- IAM roles (recommended for Lambda)
+- AWS credentials file (`~/.aws/credentials`)
+- Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+
+For local development, you can configure credentials using the AWS CLI:
+
+```bash
+aws configure
+```
+
+## Example .env File
+
+Here's a complete example for local development:
+
+```bash
+# AWS Configuration
+AWS_REGION=us-east-1
+
+# S3 Configuration
+S3_BUCKET=doc-optimizer-uploads
+
+# DynamoDB Tables
+DYNAMO_TABLE=doc-optimizer-jobs
+DYNAMO_KEYS_TABLE=doc-optimizer-api-keys
+DYNAMO_USAGE_TABLE=doc-optimizer-usage
+
+# Lambda Configuration
+LAMBDA_NAME=doc-optimizer-processor
+
+# Server Configuration
+NODE_ENV=development
+PORT=5000
+```
+
+## Validation
+
+You can verify your environment variables are properly set by checking the server logs on startup. Missing required variables will cause the application to fail when those services are accessed.
+
+<Note>
+  The `LAMBDA_NAME` variable is explicitly validated and will throw an error immediately if not set when processing is attempted (see `src/services/lambdaService.js:8`).
+</Note>

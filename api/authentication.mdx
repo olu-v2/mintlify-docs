@@ -1,0 +1,136 @@
+---
+title: 'Authentication Middleware'
+description: 'API key authentication middleware for securing endpoints'
+---
+
+## Overview
+
+The authentication middleware validates API keys sent via the `x-api-key` header and ensures clients have active, non-expired credentials before allowing access to protected endpoints.
+
+## Implementation
+
+The middleware is implemented in `/src/middleware/auth.js` and performs the following checks:
+
+1. Validates presence of API key in request headers
+2. Retrieves API key record from DynamoDB
+3. Verifies the key is active
+4. Checks expiration date if set
+5. Attaches `clientId` to request object
+6. Logs usage for analytics
+
+## Usage
+
+### Request Headers
+
+All authenticated requests must include:
+
+```http
+x-api-key: your-api-key-here
+```
+
+### Middleware Function
+
+```javascript
+const { getApiKey, logUsage } = require('../services/dynamoService');
+
+module.exports = async (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+
+  if (!apiKey) {
+    return res.status(401).json({ error: 'Missing API key', code: 'UNAUTHORIZED' });
+  }
+
+  const record = await getApiKey(apiKey);
+
+  if (!record || !record.active) {
+    return res.status(403).json({ error: 'Invalid or inactive API key', code: 'FORBIDDEN' });
+  }
+
+  if (record.expiresAt && new Date(record.expiresAt) < new Date()) {
+    return res.status(403).json({
+      success: false,
+      error: { message: 'API key has expired', code: 'KEY_EXPIRED' },
+    });
+  }
+
+  req.clientId = record.clientId;
+  await logUsage({ clientId: record.clientId, endpoint: req.path, jobId: req.body?.jobId });
+  next();
+};
+```
+
+## Error Responses
+
+<ResponseField name="401 Unauthorized" type="object">
+  Returned when the `x-api-key` header is missing.
+  
+  ```json
+  {
+    "error": "Missing API key",
+    "code": "UNAUTHORIZED"
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="403 Forbidden" type="object">
+  Returned when the API key is invalid, inactive, or expired.
+  
+  ```json
+  {
+    "error": "Invalid or inactive API key",
+    "code": "FORBIDDEN"
+  }
+  ```
+  
+  Or for expired keys:
+  
+  ```json
+  {
+    "success": false,
+    "error": {
+      "message": "API key has expired",
+      "code": "KEY_EXPIRED"
+    }
+  }
+  ```
+</ResponseField>
+
+## API Key Record Structure
+
+The middleware expects API key records with the following structure:
+
+<ParamField path="apiKey" type="string" required>
+  The unique API key identifier
+</ParamField>
+
+<ParamField path="clientId" type="string" required>
+  The client ID associated with this API key
+</ParamField>
+
+<ParamField path="active" type="boolean" required>
+  Whether the API key is currently active
+</ParamField>
+
+<ParamField path="expiresAt" type="string">
+  ISO 8601 timestamp when the key expires (optional)
+</ParamField>
+
+## Side Effects
+
+<Note>
+  The middleware automatically logs usage data for each authenticated request, including:
+  - Client ID
+  - Endpoint accessed
+  - Job ID (if present in request body)
+  - Timestamp
+</Note>
+
+## Request Augmentation
+
+After successful authentication, the middleware adds the following property to the request object:
+
+```javascript
+req.clientId // The authenticated client's ID
+```
+
+This allows downstream route handlers to access the client ID without additional database queries.

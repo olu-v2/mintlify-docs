@@ -1,0 +1,290 @@
+---
+title: Authentication
+description: Learn how API key authentication works in Doc Optimizer Server
+---
+
+## Overview
+
+Doc Optimizer Server uses API key authentication to secure all endpoints. Every request to the API must include a valid API key in the request headers.
+
+<Note>
+  API keys are validated on every request and usage is logged for monitoring and billing purposes.
+</Note>
+
+## How authentication works
+
+The authentication middleware validates your API key before processing any request. Here's what happens:
+
+<Steps>
+  <Step title="Extract API key">
+    The server reads the `x-api-key` header from your request.
+  </Step>
+  
+  <Step title="Validate key">
+    The key is checked against the DynamoDB keys table to verify it exists and is active.
+  </Step>
+  
+  <Step title="Check expiration">
+    If the key has an expiration date, the server verifies it hasn't expired.
+  </Step>
+  
+  <Step title="Log usage">
+    The request is logged to the usage table for tracking and analytics.
+  </Step>
+  
+  <Step title="Process request">
+    If all checks pass, your request proceeds to the endpoint handler.
+  </Step>
+</Steps>
+
+## Adding your API key to requests
+
+Include your API key in the `x-api-key` header with every request:
+
+<CodeGroup>
+```bash cURL
+curl https://api.docoptimizer.com/api/status/job-123 \
+  -H "x-api-key: your-api-key-here"
+```
+
+```javascript JavaScript
+const response = await fetch('https://api.docoptimizer.com/api/status/job-123', {
+  headers: {
+    'x-api-key': 'your-api-key-here'
+  }
+});
+```
+
+```python Python
+import requests
+
+response = requests.get(
+    'https://api.docoptimizer.com/api/status/job-123',
+    headers={'x-api-key': 'your-api-key-here'}
+)
+```
+</CodeGroup>
+
+## Authentication flow
+
+Here's the actual authentication middleware from the source code:
+
+```javascript src/middleware/auth.js
+const { getApiKey, logUsage } = require('../services/dynamoService');
+
+module.exports = async (req, res, next) => {
+  const apiKey = req.headers['x-api-key'];
+
+  if (!apiKey) {
+    return res.status(401).json({ error: 'Missing API key', code: 'UNAUTHORIZED' });
+  }
+
+  const record = await getApiKey(apiKey);
+
+  if (!record || !record.active) {
+    return res.status(403).json({ error: 'Invalid or inactive API key', code: 'FORBIDDEN' });
+  }
+
+  if (record.expiresAt && new Date(record.expiresAt) < new Date()) {
+    return res.status(403).json({
+      success: false,
+      error: { message: 'API key has expired', code: 'KEY_EXPIRED' },
+    });
+  }
+
+  req.clientId = record.clientId;
+  await logUsage({ clientId: record.clientId, endpoint: req.path, jobId: req.body?.jobId });
+  next();
+};
+```
+
+## API key structure
+
+API keys are stored in DynamoDB with the following attributes:
+
+- `apiKey` (string) - The API key value (partition key)
+- `clientId` (string) - Unique identifier for the client
+- `active` (boolean) - Whether the key is currently active
+- `expiresAt` (string, optional) - ISO 8601 expiration date
+
+## Error responses
+
+### Missing API key
+
+If you don't include the `x-api-key` header:
+
+```json
+{
+  "error": "Missing API key",
+  "code": "UNAUTHORIZED"
+}
+```
+
+**HTTP Status:** `401 Unauthorized`
+
+### Invalid or inactive API key
+
+If your API key doesn't exist or is marked as inactive:
+
+```json
+{
+  "error": "Invalid or inactive API key",
+  "code": "FORBIDDEN"
+}
+```
+
+**HTTP Status:** `403 Forbidden`
+
+### Expired API key
+
+If your API key has passed its expiration date:
+
+```json
+{
+  "success": false,
+  "error": {
+    "message": "API key has expired",
+    "code": "KEY_EXPIRED"
+  }
+}
+```
+
+**HTTP Status:** `403 Forbidden`
+
+## Usage tracking
+
+Every authenticated request is logged to a separate usage table with the following information:
+
+```javascript src/services/dynamoService.js:45-58
+exports.logUsage = async ({ clientId, endpoint, jobId }) => {
+  await ddb.send(
+    new PutCommand({
+      TableName: process.env.DYNAMO_USAGE_TABLE,
+      Item: {
+        usageId: uuidv4(),
+        clientId,
+        endpoint,
+        jobId: jobId || null,
+        timestamp: new Date().toISOString(),
+      },
+    })
+  );
+};
+```
+
+This data can be used for:
+
+- Monitoring API usage patterns
+- Billing and quota management
+- Debugging and troubleshooting
+- Analytics and reporting
+
+## Rate limiting
+
+In addition to authentication, the API implements rate limiting to prevent abuse:
+
+```javascript src/server.js:11-12
+app.use('/api', auth);
+app.use('/api', rateLimiter);
+```
+
+The rate limiter is applied after authentication, so only valid requests count toward your rate limit.
+
+<Warning>
+  Keep your API keys secure and never commit them to version control. If a key is compromised, contact your administrator to have it deactivated immediately.
+</Warning>
+
+## Best practices
+
+<CardGroup cols={2}>
+  <Card title="Environment variables" icon="lock">
+    Store API keys in environment variables, never hardcode them in your application.
+  </Card>
+  <Card title="Use HTTPS" icon="shield-halved">
+    Always make requests over HTTPS to prevent API key interception.
+  </Card>
+  <Card title="Rotate keys regularly" icon="arrows-rotate">
+    Request new API keys periodically and deactivate old ones.
+  </Card>
+  <Card title="Monitor usage" icon="chart-line">
+    Track your API usage to detect unusual patterns that might indicate a security issue.
+  </Card>
+</CardGroup>
+
+## Example: Secure API client
+
+Here's a recommended pattern for managing API keys in your application:
+
+```javascript
+// config.js - Never commit this file
+module.exports = {
+  apiKey: process.env.DOC_OPTIMIZER_API_KEY,
+  baseUrl: process.env.DOC_OPTIMIZER_BASE_URL || 'https://api.docoptimizer.com/api'
+};
+
+// client.js
+const config = require('./config');
+
+class DocOptimizerClient {
+  constructor() {
+    this.apiKey = config.apiKey;
+    this.baseUrl = config.baseUrl;
+    
+    if (!this.apiKey) {
+      throw new Error('DOC_OPTIMIZER_API_KEY environment variable is required');
+    }
+  }
+  
+  async makeRequest(endpoint, options = {}) {
+    const response = await fetch(`${this.baseUrl}${endpoint}`, {
+      ...options,
+      headers: {
+        'x-api-key': this.apiKey,
+        ...options.headers
+      }
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`API Error: ${error.error || error.message}`);
+    }
+    
+    return response.json();
+  }
+  
+  async getUploadUrl(contentType, optimizationLevel) {
+    return this.makeRequest('/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contentType, optimizationLevel })
+    });
+  }
+  
+  async getJobStatus(jobId) {
+    return this.makeRequest(`/status/${jobId}`);
+  }
+  
+  // ... other methods
+}
+
+module.exports = DocOptimizerClient;
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card
+    title="Quickstart"
+    icon="rocket"
+    href="/quickstart"
+  >
+    Start making authenticated requests
+  </Card>
+  <Card
+    title="API Reference"
+    icon="code"
+    href="/api/upload-url"
+  >
+    See which endpoints require authentication
+  </Card>
+</CardGroup>

@@ -1,0 +1,116 @@
+---
+title: 'Rate Limiting'
+description: 'Rate limiting configuration to prevent API abuse'
+---
+
+## Overview
+
+The rate limiting middleware protects the API from abuse by limiting the number of requests from a single IP address within a specified time window.
+
+## Configuration
+
+The rate limiter is implemented using the `express-rate-limit` package with the following settings:
+
+<ParamField path="windowMs" type="number" default="900000">
+  Time window in milliseconds: **15 minutes** (15 × 60 × 1000)
+</ParamField>
+
+<ParamField path="max" type="number" default="50">
+  Maximum number of requests per window per IP: **50 requests**
+</ParamField>
+
+<ParamField path="standardHeaders" type="boolean" default="true">
+  Includes rate limit info in `RateLimit-*` headers
+</ParamField>
+
+<ParamField path="legacyHeaders" type="boolean" default="false">
+  Disables legacy `X-RateLimit-*` headers
+</ParamField>
+
+## Implementation
+
+```javascript
+const rateLimit = require('express-rate-limit');
+
+module.exports = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 50, // 50 requests per window per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Too many requests, please try again later.',
+    code: 'RATE_LIMITED',
+  },
+});
+```
+
+## Rate Limit Headers
+
+When rate limiting is active, responses include standard rate limit headers:
+
+```http
+RateLimit-Limit: 50
+RateLimit-Remaining: 49
+RateLimit-Reset: 1678901234
+```
+
+<ResponseField name="RateLimit-Limit" type="string">
+  The maximum number of requests allowed in the current window
+</ResponseField>
+
+<ResponseField name="RateLimit-Remaining" type="string">
+  The number of requests remaining in the current window
+</ResponseField>
+
+<ResponseField name="RateLimit-Reset" type="string">
+  Unix timestamp when the rate limit window resets
+</ResponseField>
+
+## Error Response
+
+When the rate limit is exceeded, the API returns:
+
+**Status Code:** `429 Too Many Requests`
+
+```json
+{
+  "error": "Too many requests, please try again later.",
+  "code": "RATE_LIMITED"
+}
+```
+
+<Warning>
+  Rate limits are applied **per IP address**. If your application makes requests from multiple servers or uses a proxy, ensure your infrastructure is configured to pass through the correct client IP addresses.
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Monitor Rate Limit Headers">
+    Always check the `RateLimit-Remaining` header to know how many requests you have left before hitting the limit.
+  </Accordion>
+  
+  <Accordion title="Implement Exponential Backoff">
+    When you receive a 429 response, wait for the duration specified in `RateLimit-Reset` before retrying.
+  </Accordion>
+  
+  <Accordion title="Batch Operations">
+    Group multiple operations into single requests where possible to conserve your rate limit quota.
+  </Accordion>
+  
+  <Accordion title="Cache Results">
+    Cache API responses on your end to reduce redundant requests.
+  </Accordion>
+</AccordionGroup>
+
+## Rate Limit Window
+
+The rate limit operates on a **sliding window** basis:
+
+- Each IP address gets 50 requests per 15-minute window
+- The window slides continuously (not fixed intervals)
+- Once a request is more than 15 minutes old, it no longer counts against your limit
+
+<Info>
+  If you need higher rate limits for production use, contact support to discuss custom rate limit tiers.
+</Info>

@@ -1,0 +1,223 @@
+---
+title: Checking job status
+description: Learn how to monitor the status of your document processing jobs
+---
+
+After starting a processing job, you can monitor its progress using the status endpoint. This allows you to track when your document is ready for download.
+
+## Job statuses
+
+Your job will progress through the following statuses:
+
+<Steps>
+  <Step title="CREATED">
+    Initial status when the upload URL is generated
+  </Step>
+  <Step title="PENDING">
+    Processing has started and the job is being executed
+  </Step>
+  <Step title="DONE">
+    Processing completed successfully and the file is ready for download
+  </Step>
+  <Step title="ERROR">
+    Processing failed (check the `errorMsg` field for details)
+  </Step>
+</Steps>
+
+## Check job status
+
+To check the status of a job, send a GET request to `/api/status/:jobId`:
+
+```bash
+curl https://your-api.com/api/status/abc-123 \
+  -H "x-api-key: your-api-key"
+```
+
+### Response
+
+```json
+{
+  "jobId": "abc-123",
+  "status": "DONE",
+  "optimizationLevel": "medium",
+  "createdAt": "2026-03-03T10:30:00.000Z",
+  "updatedAt": "2026-03-03T10:32:15.000Z",
+  "errorMsg": null
+}
+```
+
+<Info>
+  The `updatedAt` timestamp changes whenever the job status is updated, helping you track processing duration.
+</Info>
+
+## Polling for completion
+
+Since document processing is asynchronous, you'll need to poll the status endpoint until the job completes.
+
+### JavaScript example
+
+```javascript
+async function waitForCompletion(jobId, maxAttempts = 60, intervalMs = 2000) {
+  const API_BASE = 'https://your-api.com/api';
+  const API_KEY = 'your-api-key';
+  
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await fetch(`${API_BASE}/status/${jobId}`, {
+      headers: { 'x-api-key': API_KEY }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to check status: ${response.status}`);
+    }
+    
+    const job = await response.json();
+    
+    if (job.status === 'DONE') {
+      console.log('Processing complete!');
+      return job;
+    }
+    
+    if (job.status === 'ERROR') {
+      throw new Error(`Processing failed: ${job.errorMsg}`);
+    }
+    
+    // Wait before next attempt
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+  
+  throw new Error('Timeout waiting for job completion');
+}
+
+// Usage
+try {
+  const job = await waitForCompletion('abc-123');
+  console.log('Job completed at:', job.updatedAt);
+} catch (error) {
+  console.error('Error:', error.message);
+}
+```
+
+### Python example
+
+```python
+import requests
+import time
+
+def wait_for_completion(job_id, max_attempts=60, interval_seconds=2):
+    API_BASE = 'https://your-api.com/api'
+    API_KEY = 'your-api-key'
+    
+    for attempt in range(max_attempts):
+        response = requests.get(
+            f'{API_BASE}/status/{job_id}',
+            headers={'x-api-key': API_KEY}
+        )
+        
+        if not response.ok:
+            raise Exception(f'Failed to check status: {response.status_code}')
+        
+        job = response.json()
+        
+        if job['status'] == 'DONE':
+            print('Processing complete!')
+            return job
+        
+        if job['status'] == 'ERROR':
+            raise Exception(f"Processing failed: {job['errorMsg']}")
+        
+        # Wait before next attempt
+        time.sleep(interval_seconds)
+    
+    raise Exception('Timeout waiting for job completion')
+
+# Usage
+try:
+    job = wait_for_completion('abc-123')
+    print(f"Job completed at: {job['updatedAt']}")
+except Exception as e:
+    print(f'Error: {e}')
+```
+
+<Warning>
+  Avoid polling too frequently to prevent rate limiting. A 2-3 second interval is recommended for most use cases.
+</Warning>
+
+## Handling errors
+
+If a job fails, the status will be `ERROR` and the `errorMsg` field will contain details:
+
+```json
+{
+  "jobId": "abc-123",
+  "status": "ERROR",
+  "optimizationLevel": "medium",
+  "createdAt": "2026-03-03T10:30:00.000Z",
+  "updatedAt": "2026-03-03T10:31:45.000Z",
+  "errorMsg": "Invalid PDF format"
+}
+```
+
+Common error scenarios:
+
+<AccordionGroup>
+  <Accordion title="Job not found (404)">
+    The specified `jobId` doesn't exist. Verify that you're using the correct job ID returned from the upload URL request.
+  </Accordion>
+  
+  <Accordion title="Processing failed (ERROR status)">
+    The document couldn't be processed. Check the `errorMsg` for details. Common causes include:
+    - Invalid or corrupted file format
+    - File too large for the selected optimization level
+    - Missing file at the specified S3 key
+  </Accordion>
+  
+  <Accordion title="Server error (500)">
+    An unexpected error occurred while retrieving the job status. Retry the request after a short delay.
+  </Accordion>
+</AccordionGroup>
+
+## Complete workflow with status checking
+
+```javascript
+const API_BASE = 'https://your-api.com/api';
+const API_KEY = 'your-api-key';
+
+async function optimizeDocument(file) {
+  // 1. Get upload URL
+  const urlRes = await fetch(`${API_BASE}/upload-url`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+    body: JSON.stringify({
+      contentType: file.type,
+      optimizationLevel: 'medium'
+    })
+  });
+  const { uploadUrl, key, jobId } = await urlRes.json();
+  
+  // 2. Upload file
+  await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type },
+    body: file
+  });
+  
+  // 3. Start processing
+  await fetch(`${API_BASE}/process`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
+    body: JSON.stringify({ key, optimizationLevel: 'medium', jobId })
+  });
+  
+  // 4. Wait for completion
+  const job = await waitForCompletion(jobId);
+  console.log('Document optimized successfully!');
+  
+  return jobId;
+}
+```
+
+## Next steps
+
+<Card title="Download results" icon="download" href="/guides/downloading-results">
+  Once your job status is `DONE`, learn how to download the optimized document
+</Card>

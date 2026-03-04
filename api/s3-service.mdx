@@ -1,0 +1,199 @@
+---
+title: 'S3 Service'
+description: 'S3 service for generating pre-signed upload and download URLs'
+---
+
+## Overview
+
+The S3 service provides functions for generating pre-signed URLs for secure file uploads and downloads without exposing AWS credentials to clients.
+
+## Configuration
+
+The service requires the following environment variables:
+
+<ParamField path="AWS_REGION" type="string" required>
+  AWS region where the S3 bucket is located
+</ParamField>
+
+<ParamField path="S3_BUCKET" type="string" required>
+  Name of the S3 bucket for storing files
+</ParamField>
+
+## Functions
+
+### generateUploadUrl
+
+Generates a pre-signed URL for uploading files to S3.
+
+#### Signature
+
+```javascript
+exports.generateUploadUrl = async contentType => {
+  // Implementation
+}
+```
+
+#### Parameters
+
+<ParamField path="contentType" type="string" required>
+  MIME type of the file to be uploaded (e.g., `application/pdf`, `image/png`)
+</ParamField>
+
+#### Returns
+
+<ResponseField name="uploadUrl" type="string">
+  Pre-signed URL valid for 60 seconds
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  S3 object key in format: `uploads/original/{fileId}`
+</ResponseField>
+
+<ResponseField name="fileId" type="string">
+  UUID v4 identifier for the uploaded file
+</ResponseField>
+
+#### Implementation
+
+```javascript
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { v4: uuidv4 } = require('uuid');
+
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+});
+
+exports.generateUploadUrl = async contentType => {
+  const fileId = uuidv4();
+  const key = `uploads/original/${fileId}`;
+
+  const command = new PutObjectCommand({
+    Bucket: process.env.S3_BUCKET,
+    Key: key,
+    ContentType: contentType,
+  });
+
+  const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 60 });
+
+  return { uploadUrl, key, fileId };
+};
+```
+
+#### Example Usage
+
+```javascript
+const { generateUploadUrl } = require('./services/s3Service');
+
+const result = await generateUploadUrl('application/pdf');
+console.log(result);
+// {
+//   uploadUrl: 'https://bucket.s3.amazonaws.com/uploads/original/abc-123?X-Amz-...',
+//   key: 'uploads/original/abc-123',
+//   fileId: 'abc-123'
+// }
+```
+
+<Warning>
+  Upload URLs expire after **60 seconds**. Generate a new URL if the upload fails or takes longer than expected.
+</Warning>
+
+### generateDownloadUrl
+
+Generates a pre-signed URL for downloading files from S3.
+
+#### Signature
+
+```javascript
+exports.generateDownloadUrl = async key => {
+  // Implementation
+}
+```
+
+#### Parameters
+
+<ParamField path="key" type="string" required>
+  S3 object key of the file to download
+</ParamField>
+
+#### Returns
+
+<ResponseField name="downloadUrl" type="string">
+  Pre-signed URL valid for 300 seconds (5 minutes)
+</ResponseField>
+
+#### Implementation
+
+```javascript
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+
+exports.generateDownloadUrl = async key => {
+  const command = new GetObjectCommand({
+    Bucket: process.env.S3_BUCKET,
+    Key: key,
+  });
+  return getSignedUrl(s3, command, { expiresIn: 300 });
+};
+```
+
+#### Example Usage
+
+```javascript
+const { generateDownloadUrl } = require('./services/s3Service');
+
+const downloadUrl = await generateDownloadUrl('uploads/processed/abc-123_medium.pdf');
+console.log(downloadUrl);
+// 'https://bucket.s3.amazonaws.com/uploads/processed/abc-123_medium.pdf?X-Amz-...'
+```
+
+<Info>
+  Download URLs are valid for **5 minutes** (300 seconds), providing clients sufficient time to initiate and complete downloads.
+</Info>
+
+## S3 Key Structure
+
+The service uses a consistent key structure:
+
+<CodeGroup>
+```text Original Uploads
+uploads/original/{fileId}
+```
+
+```text Processed Files
+uploads/processed/{jobId}_{optimizationLevel}.pdf
+```
+</CodeGroup>
+
+## Security Considerations
+
+<CardGroup cols={2}>
+  <Card title="Temporary Access" icon="clock">
+    Pre-signed URLs provide time-limited access without exposing AWS credentials
+  </Card>
+  
+  <Card title="Content Type Validation" icon="shield-check">
+    Upload URLs enforce the specified content type at the S3 level
+  </Card>
+  
+  <Card title="Unique File IDs" icon="fingerprint">
+    UUID v4 ensures no key collisions and prevents guessing file locations
+  </Card>
+  
+  <Card title="Bucket Isolation" icon="database">
+    All operations are scoped to the configured S3 bucket
+  </Card>
+</CardGroup>
+
+## Error Handling
+
+Both functions may throw errors in the following scenarios:
+
+- Missing or invalid environment variables
+- Insufficient AWS permissions
+- S3 service unavailability
+- Invalid bucket or key names
+
+<Note>
+  Ensure your AWS IAM role has `s3:PutObject` and `s3:GetObject` permissions for the configured bucket.
+</Note>

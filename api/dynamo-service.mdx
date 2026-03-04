@@ -1,0 +1,455 @@
+---
+title: 'DynamoDB Service'
+description: 'DynamoDB service for job management, API keys, and usage tracking'
+---
+
+## Overview
+
+The DynamoDB service provides data access functions for managing optimization jobs, API key validation, and usage logging.
+
+## Configuration
+
+The service requires the following environment variables:
+
+<ParamField path="AWS_REGION" type="string" required>
+  AWS region where DynamoDB tables are located
+</ParamField>
+
+<ParamField path="DYNAMO_TABLE" type="string" required>
+  Primary table name for job records
+</ParamField>
+
+<ParamField path="DYNAMO_USAGE_TABLE" type="string" required>
+  Table name for API usage logs (typically `api_usage`)
+</ParamField>
+
+<ParamField path="DYNAMO_KEYS_TABLE" type="string" required>
+  Table name for API key records
+</ParamField>
+
+## Client Initialization
+
+```javascript
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const {
+  DynamoDBDocumentClient,
+  PutCommand,
+  GetCommand,
+  UpdateCommand,
+} = require('@aws-sdk/lib-dynamodb');
+
+const db = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
+const TABLE = process.env.DYNAMO_TABLE;
+```
+
+## Functions
+
+### createJob
+
+Creates a new optimization job record in DynamoDB.
+
+#### Signature
+
+```javascript
+exports.createJob = async ({ jobId, key, optimizationLevel }) => {
+  // Implementation
+}
+```
+
+#### Parameters
+
+<ParamField path="jobId" type="string" required>
+  Unique identifier for the job
+</ParamField>
+
+<ParamField path="key" type="string" required>
+  S3 key of the input file
+</ParamField>
+
+<ParamField path="optimizationLevel" type="string" required>
+  Optimization level: `low`, `medium`, or `high`
+</ParamField>
+
+#### Implementation
+
+```javascript
+exports.createJob = async ({ jobId, key, optimizationLevel }) => {
+  await db.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: {
+        jobId,
+        status: 'CREATED',
+        inputKey: key,
+        outputKey: `uploads/processed/${jobId}_${optimizationLevel}.pdf`,
+        optimizationLevel,
+        createdAt: new Date().toISOString(),
+      },
+    })
+  );
+};
+```
+
+#### Job Record Structure
+
+<ResponseField name="jobId" type="string">
+  Unique job identifier (partition key)
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Initial status: `CREATED`
+</ResponseField>
+
+<ResponseField name="inputKey" type="string">
+  S3 key of the original uploaded file
+</ResponseField>
+
+<ResponseField name="outputKey" type="string">
+  S3 key where processed file will be stored: `uploads/processed/{jobId}_{optimizationLevel}.pdf`
+</ResponseField>
+
+<ResponseField name="optimizationLevel" type="string">
+  The requested optimization level
+</ResponseField>
+
+<ResponseField name="createdAt" type="string">
+  ISO 8601 timestamp of job creation
+</ResponseField>
+
+#### Example Usage
+
+```javascript
+const { createJob } = require('./services/dynamoService');
+
+await createJob({
+  jobId: 'job-abc-123',
+  key: 'uploads/original/file-xyz',
+  optimizationLevel: 'medium'
+});
+```
+
+### updateJobStatus
+
+Updates the status of an existing job.
+
+#### Signature
+
+```javascript
+exports.updateJobStatus = async (jobId, status, extra = {}) => {
+  // Implementation
+}
+```
+
+#### Parameters
+
+<ParamField path="jobId" type="string" required>
+  Job identifier to update
+</ParamField>
+
+<ParamField path="status" type="string" required>
+  New status value (e.g., `PROCESSING`, `COMPLETED`, `FAILED`)
+</ParamField>
+
+<ParamField path="extra" type="object">
+  Additional attributes to update (optional)
+</ParamField>
+
+#### Implementation
+
+```javascript
+exports.updateJobStatus = async (jobId, status, extra = {}) => {
+  await db.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { jobId },
+      UpdateExpression: 'SET #s = :s, updatedAT = :t',
+      ExpressionAttributeNames: { '#s': 'status' },
+      ExpressionAttributeValues: { ':s': status, ':t': new Date().toISOString(), ...extra },
+    })
+  );
+};
+```
+
+<Note>
+  The function uses `#s` as an alias for the `status` attribute to avoid conflicts with DynamoDB reserved keywords.
+</Note>
+
+#### Example Usage
+
+```javascript
+const { updateJobStatus } = require('./services/dynamoService');
+
+// Basic status update
+await updateJobStatus('job-abc-123', 'PROCESSING');
+
+// With additional attributes
+await updateJobStatus('job-abc-123', 'COMPLETED', {
+  ':fileSize': 1024000,
+  ':compressionRatio': 0.65
+});
+```
+
+### getJob
+
+Retrieves a job record by ID.
+
+#### Signature
+
+```javascript
+exports.getJob = async jobId => {
+  // Implementation
+}
+```
+
+#### Parameters
+
+<ParamField path="jobId" type="string" required>
+  Job identifier to retrieve
+</ParamField>
+
+#### Returns
+
+<ResponseField name="Item" type="object | undefined">
+  The job record if found, or `undefined` if not found
+</ResponseField>
+
+#### Implementation
+
+```javascript
+exports.getJob = async jobId => {
+  const { Item } = await db.send(new GetCommand({ TableName: TABLE, Key: { jobId } }));
+  return Item;
+};
+```
+
+#### Example Usage
+
+```javascript
+const { getJob } = require('./services/dynamoService');
+
+const job = await getJob('job-abc-123');
+
+if (job) {
+  console.log(`Job status: ${job.status}`);
+  console.log(`Created: ${job.createdAt}`);
+} else {
+  console.log('Job not found');
+}
+```
+
+### logUsage
+
+Logs API usage to the usage tracking table.
+
+#### Signature
+
+```javascript
+exports.logUsage = async ({ clientId, endpoint, jobId }) => {
+  // Implementation
+}
+```
+
+#### Parameters
+
+<ParamField path="clientId" type="string" required>
+  Client identifier making the request
+</ParamField>
+
+<ParamField path="endpoint" type="string" required>
+  API endpoint accessed (e.g., `/api/upload`, `/api/status`)
+</ParamField>
+
+<ParamField path="jobId" type="string | null">
+  Associated job ID if applicable, otherwise `null`
+</ParamField>
+
+#### Implementation
+
+```javascript
+exports.logUsage = async ({ clientId, endpoint, jobId }) => {
+  await ddb.send(
+    new PutCommand({
+      TableName: process.env.DYNAMO_USAGE_TABLE, // separate table: api_usage
+      Item: {
+        usageId: uuidv4(),
+        clientId,
+        endpoint,
+        jobId: jobId || null,
+        timestamp: new Date().toISOString(),
+      },
+    })
+  );
+};
+```
+
+#### Usage Record Structure
+
+<ResponseField name="usageId" type="string">
+  Unique UUID v4 identifier for the usage record
+</ResponseField>
+
+<ResponseField name="clientId" type="string">
+  Client who made the request
+</ResponseField>
+
+<ResponseField name="endpoint" type="string">
+  Endpoint that was accessed
+</ResponseField>
+
+<ResponseField name="jobId" type="string | null">
+  Associated job ID or null
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp of the request
+</ResponseField>
+
+<Warning>
+  Note: The implementation references `ddb` instead of `db` and `uuidv4()` which are not shown in the initialization code. This may be a bug in the source code.
+</Warning>
+
+#### Example Usage
+
+```javascript
+const { logUsage } = require('./services/dynamoService');
+
+await logUsage({
+  clientId: 'client-xyz',
+  endpoint: '/api/upload',
+  jobId: 'job-abc-123'
+});
+```
+
+### getApiKey
+
+Retrieves an API key record for validation.
+
+#### Signature
+
+```javascript
+exports.getApiKey = async apiKey => {
+  // Implementation
+}
+```
+
+#### Parameters
+
+<ParamField path="apiKey" type="string" required>
+  API key to look up
+</ParamField>
+
+#### Returns
+
+<ResponseField name="Item" type="object | undefined">
+  The API key record if found, or `undefined` if not found
+</ResponseField>
+
+#### Implementation
+
+```javascript
+exports.getApiKey = async apiKey => {
+  const { Item } = await ddb.send(
+    new GetCommand({
+      TableName: process.env.DYNAMO_KEYS_TABLE,
+      Key: { apiKey },
+    })
+  );
+
+  return Item;
+};
+```
+
+#### API Key Record Structure
+
+<ResponseField name="apiKey" type="string">
+  The API key (partition key)
+</ResponseField>
+
+<ResponseField name="clientId" type="string">
+  Associated client identifier
+</ResponseField>
+
+<ResponseField name="active" type="boolean">
+  Whether the key is currently active
+</ResponseField>
+
+<ResponseField name="expiresAt" type="string">
+  ISO 8601 expiration timestamp (optional)
+</ResponseField>
+
+<Warning>
+  Note: Similar to `logUsage`, this function references `ddb` instead of `db`, which may be a bug in the source code.
+</Warning>
+
+#### Example Usage
+
+```javascript
+const { getApiKey } = require('./services/dynamoService');
+
+const keyRecord = await getApiKey('sk_live_1234567890');
+
+if (keyRecord && keyRecord.active) {
+  console.log(`Valid key for client: ${keyRecord.clientId}`);
+} else {
+  console.log('Invalid or inactive API key');
+}
+```
+
+## Table Structure Summary
+
+<CardGroup cols={3}>
+  <Card title="Jobs Table" icon="briefcase">
+    Stores optimization job records with status tracking
+    
+    **Key:** `jobId` (string)
+  </Card>
+  
+  <Card title="Usage Table" icon="chart-line">
+    Logs all API requests for analytics and billing
+    
+    **Key:** `usageId` (string)
+  </Card>
+  
+  <Card title="Keys Table" icon="key">
+    Stores API key credentials and metadata
+    
+    **Key:** `apiKey` (string)
+  </Card>
+</CardGroup>
+
+## Error Handling
+
+All functions may throw errors for:
+
+- Missing or invalid environment variables
+- DynamoDB service unavailability
+- Insufficient IAM permissions
+- Invalid table or key structure
+- Throttling or capacity limits
+
+<Tip>
+  Implement proper error handling and retry logic with exponential backoff for production applications.
+</Tip>
+
+## IAM Permissions Required
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:PutItem",
+        "dynamodb:GetItem",
+        "dynamodb:UpdateItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:REGION:ACCOUNT:table/JOBS_TABLE",
+        "arn:aws:dynamodb:REGION:ACCOUNT:table/USAGE_TABLE",
+        "arn:aws:dynamodb:REGION:ACCOUNT:table/KEYS_TABLE"
+      ]
+    }
+  ]
+}
+```

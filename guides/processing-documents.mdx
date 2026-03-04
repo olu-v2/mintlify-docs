@@ -1,0 +1,222 @@
+---
+title: Processing documents
+description: Learn how to start document processing with different optimization levels
+---
+
+Once you've uploaded a document, you can initiate the optimization process. The Doc Optimizer Server supports three optimization levels, each balancing file size and quality differently.
+
+## Optimization levels
+
+<CardGroup cols={3}>
+  <Card title="Low" icon="gauge-simple-low">
+    Minimal compression with maximum quality preservation. Best for documents where quality is critical.
+  </Card>
+  <Card title="Medium" icon="gauge-simple">
+    Balanced compression and quality. Recommended for most use cases.
+  </Card>
+  <Card title="High" icon="gauge-simple-high">
+    Maximum compression with acceptable quality loss. Ideal for large files where size is a priority.
+  </Card>
+</CardGroup>
+
+## Start processing
+
+To begin processing your uploaded document, send a POST request to `/api/process`:
+
+<ParamField path="key" type="string" required>
+  The S3 key returned from the upload URL request (e.g., `uploads/original/abc-123`)
+</ParamField>
+
+<ParamField path="optimizationLevel" type="string" required>
+  The optimization level: `low`, `medium`, or `high`
+</ParamField>
+
+<ParamField path="jobId" type="string" required>
+  The job ID returned from the upload URL request
+</ParamField>
+
+### Example request
+
+```bash
+curl -X POST https://your-api.com/api/process \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key" \
+  -d '{
+    "key": "uploads/original/abc-123",
+    "optimizationLevel": "medium",
+    "jobId": "abc-123"
+  }'
+```
+
+### Response
+
+```json
+{
+  "message": "Processing started",
+  "jobId": "abc-123"
+}
+```
+
+<Info>
+  The job status will be updated to `PENDING` when processing begins. Processing time varies based on document size and optimization level.
+</Info>
+
+## Complete workflow example
+
+Here's how to combine upload and processing in a single workflow:
+
+<Steps>
+  <Step title="Request upload URL">
+    Specify your content type and optimization level
+  </Step>
+  <Step title="Upload the file">
+    Use the presigned URL to upload your document
+  </Step>
+  <Step title="Start processing">
+    Initiate optimization using the returned `key` and `jobId`
+  </Step>
+  <Step title="Monitor progress">
+    Poll the status endpoint to track processing
+  </Step>
+</Steps>
+
+### JavaScript example
+
+```javascript
+const API_BASE = 'https://your-api.com/api';
+const API_KEY = 'your-api-key';
+
+async function processDocument(file, optimizationLevel) {
+  // Step 1: Get upload URL
+  const urlResponse = await fetch(`${API_BASE}/upload-url`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': API_KEY
+    },
+    body: JSON.stringify({
+      contentType: file.type,
+      optimizationLevel
+    })
+  });
+  
+  const { uploadUrl, key, jobId } = await urlResponse.json();
+  
+  // Step 2: Upload file
+  await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': file.type },
+    body: file
+  });
+  
+  // Step 3: Start processing
+  const processResponse = await fetch(`${API_BASE}/process`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': API_KEY
+    },
+    body: JSON.stringify({ key, optimizationLevel, jobId })
+  });
+  
+  const result = await processResponse.json();
+  console.log('Processing started:', result.jobId);
+  
+  return jobId;
+}
+
+// Usage
+const fileInput = document.getElementById('file');
+const jobId = await processDocument(fileInput.files[0], 'medium');
+```
+
+### Python example
+
+```python
+import requests
+
+API_BASE = 'https://your-api.com/api'
+API_KEY = 'your-api-key'
+
+def process_document(file_path, optimization_level):
+    headers = {'x-api-key': API_KEY}
+    
+    # Step 1: Get upload URL
+    url_response = requests.post(
+        f'{API_BASE}/upload-url',
+        headers=headers,
+        json={
+            'contentType': 'application/pdf',
+            'optimizationLevel': optimization_level
+        }
+    )
+    
+    data = url_response.json()
+    upload_url = data['uploadUrl']
+    key = data['key']
+    job_id = data['jobId']
+    
+    # Step 2: Upload file
+    with open(file_path, 'rb') as f:
+        requests.put(
+            upload_url,
+            headers={'Content-Type': 'application/pdf'},
+            data=f
+        )
+    
+    # Step 3: Start processing
+    process_response = requests.post(
+        f'{API_BASE}/process',
+        headers=headers,
+        json={'key': key, 'optimizationLevel': optimization_level, 'jobId': job_id}
+    )
+    
+    result = process_response.json()
+    print(f"Processing started: {result['jobId']}")
+    
+    return job_id
+
+# Usage
+job_id = process_document('document.pdf', 'medium')
+```
+
+<Warning>
+  Make sure to upload your file before calling the `/api/process` endpoint. The processing will fail if the file doesn't exist at the specified S3 key.
+</Warning>
+
+## Error handling
+
+The API returns standard HTTP status codes:
+
+- `200`: Processing started successfully
+- `400`: Missing required parameters
+- `500`: Server error during processing
+
+Always check the response status and handle errors appropriately:
+
+```javascript
+const response = await fetch(`${API_BASE}/process`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'x-api-key': API_KEY
+  },
+  body: JSON.stringify({ key, optimizationLevel, jobId })
+});
+
+if (!response.ok) {
+  const error = await response.json();
+  throw new Error(`Processing failed: ${error.error}`);
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Check status" icon="clock" href="/guides/checking-status">
+    Learn how to monitor your processing job
+  </Card>
+  <Card title="Download results" icon="download" href="/guides/downloading-results">
+    Retrieve your optimized document
+  </Card>
+</CardGroup>

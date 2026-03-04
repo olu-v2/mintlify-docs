@@ -1,0 +1,78 @@
+---
+title: 'Upload URL'
+description: 'Generate a pre-signed S3 upload URL for document optimization'
+---
+
+## POST /api/upload-url
+
+Generates a pre-signed S3 URL for uploading a document and creates a job record for tracking the optimization process.
+
+<Note>
+This is the first step in the document optimization workflow. After receiving the upload URL, upload your file to S3, then call the `/api/process` endpoint to start optimization.
+</Note>
+
+## Request Body
+
+<ParamField body="contentType" type="string" required>
+  The MIME type of the file to be uploaded (e.g., `application/pdf`, `image/jpeg`).
+</ParamField>
+
+<ParamField body="optimizationLevel" type="string" required>
+  The level of optimization to apply. Must be one of:
+  - `low` - Minimal optimization, faster processing
+  - `medium` - Balanced optimization
+  - `high` - Maximum optimization, slower processing
+</ParamField>
+
+## Response
+
+<ResponseField name="uploadUrl" type="string">
+  Pre-signed S3 URL for uploading the file. Valid for a limited time.
+</ResponseField>
+
+<ResponseField name="key" type="string">
+  The S3 object key where the file will be stored.
+</ResponseField>
+
+<ResponseField name="jobId" type="string">
+  Unique identifier for tracking the optimization job.
+</ResponseField>
+
+## Error Codes
+
+| Status Code | Error Message | Description |
+|-------------|---------------|-------------|
+| 400 | Content type required | The `contentType` parameter is missing |
+| 400 | optimizationLevel required | The `optimizationLevel` parameter is missing |
+| 400 | optimizationLevel must be low, medium, or high | Invalid optimization level provided |
+| 500 | Failed to generate upload URL | Server error occurred while generating the upload URL |
+
+## Example Request
+
+```bash
+curl -X POST https://api.example.com/api/upload-url \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key-here" \
+  -d '{
+    "contentType": "application/pdf",
+    "optimizationLevel": "medium"
+  }'
+```
+
+## Example Response
+
+```json
+{
+  "uploadUrl": "https://s3.amazonaws.com/bucket/path/file?signature=...",
+  "key": "uploads/abc123-document.pdf",
+  "jobId": "abc123-def456-ghi789"
+}
+```
+
+## Usage Flow
+
+1. Call this endpoint to get a pre-signed upload URL
+2. Upload your file to the `uploadUrl` using a PUT request
+3. Call `/api/process` with the returned `key` and `jobId` to start optimization
+4. Poll `/api/status/:jobId` to check processing status
+5. Download the optimized file from `/api/download/:jobId` when complete

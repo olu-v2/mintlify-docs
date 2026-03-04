@@ -1,0 +1,106 @@
+---
+title: 'Process'
+description: 'Start the document optimization process'
+---
+
+## POST /api/process
+
+Initiates the document optimization process by invoking the processing Lambda function. This endpoint should be called after successfully uploading a file to the S3 URL obtained from `/api/upload-url`.
+
+<Warning>
+Ensure the file has been successfully uploaded to S3 before calling this endpoint. The job status will be updated to `PENDING` and processing will begin asynchronously.
+</Warning>
+
+## Request Body
+
+<ParamField body="key" type="string" required>
+  The S3 object key returned from the `/api/upload-url` endpoint.
+</ParamField>
+
+<ParamField body="optimizationLevel" type="string" required>
+  The optimization level. Must be one of:
+  - `low` - Minimal optimization
+  - `medium` - Balanced optimization
+  - `high` - Maximum optimization
+</ParamField>
+
+<ParamField body="jobId" type="string" required>
+  The job ID returned from the `/api/upload-url` endpoint.
+</ParamField>
+
+## Response
+
+<ResponseField name="success" type="boolean">
+  Always `true` for successful responses.
+</ResponseField>
+
+<ResponseField name="data" type="object">
+  Response data object containing:
+  
+  <Expandable title="data properties">
+    <ResponseField name="message" type="string">
+      Confirmation message indicating processing has started.
+    </ResponseField>
+    
+    <ResponseField name="jobId" type="string">
+      The job ID for tracking the optimization process.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="timestamp" type="string">
+  ISO 8601 timestamp of the response.
+</ResponseField>
+
+## Error Codes
+
+| Status Code | Error Message | Description |
+|-------------|---------------|-------------|
+| 400 | Missing parameters: key, optimizationLevel, jobId | One or more required parameters are missing |
+| 500 | Processing failed to start | Server error occurred while starting the processing job |
+
+## Example Request
+
+```bash
+curl -X POST https://api.example.com/api/process \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: your-api-key-here" \
+  -d '{
+    "key": "uploads/abc123-document.pdf",
+    "optimizationLevel": "medium",
+    "jobId": "abc123-def456-ghi789"
+  }'
+```
+
+## Example Response
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Processing started",
+    "jobId": "abc123-def456-ghi789"
+  },
+  "timestamp": "2026-03-03T10:30:15.000Z"
+}
+```
+
+## Processing Flow
+
+<Steps>
+  <Step title="Job Status Update">
+    The job status is updated to `PENDING` in DynamoDB.
+  </Step>
+  
+  <Step title="Lambda Invocation">
+    The processing Lambda function is invoked asynchronously with the provided parameters.
+  </Step>
+  
+  <Step title="Async Processing">
+    The Lambda function processes the document in the background. Use `/api/status/:jobId` to monitor progress.
+  </Step>
+</Steps>
+
+<Note>
+Processing time varies based on file size and optimization level. Use the `/api/status/:jobId` endpoint to poll for completion.
+</Note>
