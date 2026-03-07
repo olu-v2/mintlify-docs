@@ -28,7 +28,7 @@ Once your job status is `DONE`, call the `/api/download/:jobId` endpoint to get 
 ## Request a download URL
 
 ```bash
-curl https://your-api.com/api/download/abc-123 \
+curl https://781dzb51di.execute-api.us-east-1.amazonaws.com/api/download/abc-123 \
   -H "x-api-key: your-api-key"
 ```
 
@@ -80,7 +80,7 @@ Here is the full upload → process → poll → download flow:
 ### JavaScript example
 
 ```javascript
-const API_BASE = "https://your-api.com/api";
+const API_BASE = "https://781dzb51di.execute-api.us-east-1.amazonaws.com/api";
 const API_KEY = "your-api-key";
 const headers = { "x-api-key": API_KEY };
 
@@ -151,7 +151,7 @@ await optimizeAndDownload(file, "medium");
 import requests
 import time
 
-API_BASE = 'https://your-api.com/api'
+API_BASE = 'https://781dzb51di.execute-api.us-east-1.amazonaws.com/api'
 API_KEY = 'your-api-key'
 headers = {'x-api-key': API_KEY}
 

@@ -37,7 +37,7 @@ Send a POST request to `/api/upload-url`:
 ### Example request
 
 ```bash
-curl -X POST https://your-api.com/api/upload-url \
+curl -X POST https://781dzb51di.execute-api.us-east-1.amazonaws.com/api/upload-url \
   -H "Content-Type: application/json" \
   -H "x-api-key: your-api-key" \
   -d '{
@@ -86,7 +86,7 @@ A successful upload returns HTTP `200` with no body. Any non-200 response from S
 ## JavaScript example
 
 ```javascript
-const API_BASE = "https://your-api.com/api";
+const API_BASE = "https://781dzb51di.execute-api.us-east-1.amazonaws.com/api";
 const API_KEY = "your-api-key";
 
 async function requestUploadUrl(file, optimizationLevel) {
@@ -135,7 +135,7 @@ console.log("Upload complete! Job ID:", jobId);
 ```python
 import requests
 
-API_BASE = 'https://your-api.com/api'
+API_BASE = 'https://781dzb51di.execute-api.us-east-1.amazonaws.com/api'
 API_KEY = 'your-api-key'
 
 def request_upload_url(file_path, content_type, optimization_level):

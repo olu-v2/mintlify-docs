@@ -33,7 +33,7 @@ Send a POST request to `/api/process`:
 ### Example request
 
 ```bash
-curl -X POST https://your-api.com/api/process \
+curl -X POST https://781dzb51di.execute-api.us-east-1.amazonaws.com/api/process \
   -H "Content-Type: application/json" \
   -H "x-api-key: your-api-key" \
   -d '{
@@ -70,7 +70,7 @@ curl -X POST https://your-api.com/api/process \
 ## JavaScript example
 
 ```javascript
-const API_BASE = "https://your-api.com/api";
+const API_BASE = "https://781dzb51di.execute-api.us-east-1.amazonaws.com/api";
 const API_KEY = "your-api-key";
 
 async function startProcessing(key, optimizationLevel, jobId) {
@@ -106,7 +106,7 @@ console.log("Processing started for job:", jobId);
 ```python
 import requests
 
-API_BASE = 'https://your-api.com/api'
+API_BASE = 'https://781dzb51di.execute-api.us-east-1.amazonaws.com/api'
 API_KEY = 'your-api-key'
 
 def start_processing(key, optimization_level, job_id):

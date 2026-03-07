@@ -22,7 +22,7 @@ Your job progresses through these statuses in order:
 Send a GET request to `/api/status/:jobId`:
 
 ```bash
-curl https://your-api.com/api/status/abc-123 \
+curl https://781dzb51di.execute-api.us-east-1.amazonaws.com/api/status/abc-123 \
   -H "x-api-key: your-api-key"
 ```
 
@@ -55,7 +55,7 @@ Since processing is asynchronous, poll the endpoint at regular intervals until t
 ### JavaScript example
 
 ```javascript
-const API_BASE = "https://your-api.com/api";
+const API_BASE = "https://781dzb51di.execute-api.us-east-1.amazonaws.com/api";
 const API_KEY = "your-api-key";
 
 async function waitForCompletion(jobId, intervalMs = 2500, timeoutMs = 60000) {
@@ -104,7 +104,7 @@ try {
 import requests
 import time
 
-API_BASE = 'https://your-api.com/api'
+API_BASE = 'https://781dzb51di.execute-api.us-east-1.amazonaws.com/api'
 API_KEY = 'your-api-key'
 
 def wait_for_completion(job_id, interval_seconds=2.5, timeout_seconds=60):
