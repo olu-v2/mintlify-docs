@@ -3,30 +3,23 @@ title: Checking job status
 description: Learn how to monitor the status of your document processing jobs
 ---
 
-After starting a processing job, you can monitor its progress using the status endpoint. This allows you to track when your document is ready for download.
+After starting a processing job, poll the `/api/status/:jobId` endpoint to track progress. Once the status is `DONE`, you can request a download URL.
 
 ## Job statuses
 
-Your job will progress through the following statuses:
+Your job progresses through these statuses in order:
 
-<Steps>
-  <Step title="CREATED">
-    Initial status when the upload URL is generated
-  </Step>
-  <Step title="PENDING">
-    Processing has started and the job is being executed
-  </Step>
-  <Step title="DONE">
-    Processing completed successfully and the file is ready for download
-  </Step>
-  <Step title="ERROR">
-    Processing failed (check the `errorMsg` field for details)
-  </Step>
-</Steps>
+| Status       | Description                                          |
+| ------------ | ---------------------------------------------------- |
+| `CREATED`    | Job record created when the upload URL was generated |
+| `PENDING`    | Processing request received, queued for execution    |
+| `PROCESSING` | Lambda is actively compressing the document          |
+| `DONE`       | Processing complete — file is ready to download      |
+| `FAILED`     | Processing failed — check `errorMsg` for details     |
 
 ## Check job status
 
-To check the status of a job, send a GET request to `/api/status/:jobId`:
+Send a GET request to `/api/status/:jobId`:
 
 ```bash
 curl https://your-api.com/api/status/abc-123 \
@@ -40,60 +33,68 @@ curl https://your-api.com/api/status/abc-123 \
   "jobId": "abc-123",
   "status": "DONE",
   "optimizationLevel": "medium",
-  "createdAt": "2026-03-03T10:30:00.000Z",
-  "updatedAt": "2026-03-03T10:32:15.000Z",
+  "createdAt": "2026-03-07T10:00:00.000Z",
+  "updatedAt": "2026-03-07T10:02:15.000Z",
   "errorMsg": null
 }
 ```
 
 <Info>
-  The `updatedAt` timestamp changes whenever the job status is updated, helping you track processing duration.
+  The `updatedAt` timestamp changes each time the job status changes, making it
+  useful for tracking processing duration.
 </Info>
+
+<Note>
+  The status endpoint response is **not** wrapped in the standard `{ success, data }` envelope — the job fields are returned directly.
+</Note>
 
 ## Polling for completion
 
-Since document processing is asynchronous, you'll need to poll the status endpoint until the job completes.
+Since processing is asynchronous, poll the endpoint at regular intervals until the status is `DONE` or `FAILED`. A **2–3 second interval** is recommended to avoid hitting rate limits.
 
 ### JavaScript example
 
 ```javascript
-async function waitForCompletion(jobId, maxAttempts = 60, intervalMs = 2000) {
-  const API_BASE = 'https://your-api.com/api';
-  const API_KEY = 'your-api-key';
-  
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+const API_BASE = "https://your-api.com/api";
+const API_KEY = "your-api-key";
+
+async function waitForCompletion(jobId, intervalMs = 2500, timeoutMs = 60000) {
+  const start = Date.now();
+
+  while (true) {
     const response = await fetch(`${API_BASE}/status/${jobId}`, {
-      headers: { 'x-api-key': API_KEY }
+      headers: { "x-api-key": API_KEY },
     });
-    
+
     if (!response.ok) {
       throw new Error(`Failed to check status: ${response.status}`);
     }
-    
+
     const job = await response.json();
-    
-    if (job.status === 'DONE') {
-      console.log('Processing complete!');
+
+    if (job.status === "DONE") {
+      console.log("Processing complete!");
       return job;
     }
-    
-    if (job.status === 'ERROR') {
+
+    if (job.status === "FAILED") {
       throw new Error(`Processing failed: ${job.errorMsg}`);
     }
-    
-    // Wait before next attempt
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
+
+    if (Date.now() - start >= timeoutMs) {
+      throw new Error("Timed out waiting for job completion");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  
-  throw new Error('Timeout waiting for job completion');
 }
 
 // Usage
 try {
-  const job = await waitForCompletion('abc-123');
-  console.log('Job completed at:', job.updatedAt);
+  const job = await waitForCompletion("abc-123");
+  console.log("Completed at:", job.updatedAt);
 } catch (error) {
-  console.error('Error:', error.message);
+  console.error("Error:", error.message);
 }
 ```
 
@@ -103,121 +104,86 @@ try {
 import requests
 import time
 
-def wait_for_completion(job_id, max_attempts=60, interval_seconds=2):
-    API_BASE = 'https://your-api.com/api'
-    API_KEY = 'your-api-key'
-    
-    for attempt in range(max_attempts):
+API_BASE = 'https://your-api.com/api'
+API_KEY = 'your-api-key'
+
+def wait_for_completion(job_id, interval_seconds=2.5, timeout_seconds=60):
+    start = time.time()
+
+    while True:
         response = requests.get(
             f'{API_BASE}/status/{job_id}',
             headers={'x-api-key': API_KEY}
         )
-        
-        if not response.ok:
-            raise Exception(f'Failed to check status: {response.status_code}')
-        
+        response.raise_for_status()
         job = response.json()
-        
+
         if job['status'] == 'DONE':
             print('Processing complete!')
             return job
-        
-        if job['status'] == 'ERROR':
+
+        if job['status'] == 'FAILED':
             raise Exception(f"Processing failed: {job['errorMsg']}")
-        
-        # Wait before next attempt
+
+        if time.time() - start >= timeout_seconds:
+            raise Exception('Timed out waiting for job completion')
+
         time.sleep(interval_seconds)
-    
-    raise Exception('Timeout waiting for job completion')
 
 # Usage
 try:
     job = wait_for_completion('abc-123')
-    print(f"Job completed at: {job['updatedAt']}")
+    print(f"Completed at: {job['updatedAt']}")
 except Exception as e:
     print(f'Error: {e}')
 ```
 
-<Warning>
-  Avoid polling too frequently to prevent rate limiting. A 2-3 second interval is recommended for most use cases.
-</Warning>
+## Handling failures
 
-## Handling errors
-
-If a job fails, the status will be `ERROR` and the `errorMsg` field will contain details:
+When a job has `status: "FAILED"`, the `errorMsg` field contains a human-readable explanation:
 
 ```json
 {
   "jobId": "abc-123",
-  "status": "ERROR",
+  "status": "FAILED",
   "optimizationLevel": "medium",
-  "createdAt": "2026-03-03T10:30:00.000Z",
-  "updatedAt": "2026-03-03T10:31:45.000Z",
-  "errorMsg": "Invalid PDF format"
+  "createdAt": "2026-03-07T10:00:00.000Z",
+  "updatedAt": "2026-03-07T10:01:45.000Z",
+  "errorMsg": "File extension not supported."
 }
 ```
 
-Common error scenarios:
+Common causes of failure:
 
-<AccordionGroup>
-  <Accordion title="Job not found (404)">
-    The specified `jobId` doesn't exist. Verify that you're using the correct job ID returned from the upload URL request.
-  </Accordion>
-  
-  <Accordion title="Processing failed (ERROR status)">
-    The document couldn't be processed. Check the `errorMsg` for details. Common causes include:
-    - Invalid or corrupted file format
-    - File too large for the selected optimization level
-    - Missing file at the specified S3 key
-  </Accordion>
-  
-  <Accordion title="Server error (500)">
-    An unexpected error occurred while retrieving the job status. Retry the request after a short delay.
-  </Accordion>
-</AccordionGroup>
+- **Invalid or corrupted file** — the file at the S3 key could not be read or parsed
+- **Unsupported file extension** — the file extension did not match the declared content type
+- **Processing service error** — the downstream compression service returned an error
 
-## Complete workflow with status checking
+## Error handling
 
-```javascript
-const API_BASE = 'https://your-api.com/api';
-const API_KEY = 'your-api-key';
+<ResponseField name="404" type="Not Found">
+  The job ID does not exist:
 
-async function optimizeDocument(file) {
-  // 1. Get upload URL
-  const urlRes = await fetch(`${API_BASE}/upload-url`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
-    body: JSON.stringify({
-      contentType: file.type,
-      optimizationLevel: 'medium'
-    })
-  });
-  const { uploadUrl, key, jobId } = await urlRes.json();
-  
-  // 2. Upload file
-  await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type },
-    body: file
-  });
-  
-  // 3. Start processing
-  await fetch(`${API_BASE}/process`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': API_KEY },
-    body: JSON.stringify({ key, optimizationLevel: 'medium', jobId })
-  });
-  
-  // 4. Wait for completion
-  const job = await waitForCompletion(jobId);
-  console.log('Document optimized successfully!');
-  
-  return jobId;
+```json
+{
+  "error": "Job not found"
 }
 ```
+
+</ResponseField>
+
+<ResponseField name="500" type="Server Error">
+  Failed to retrieve job status. Retry after a short delay.
+</ResponseField>
 
 ## Next steps
 
-<Card title="Download results" icon="download" href="/guides/downloading-results">
-  Once your job status is `DONE`, learn how to download the optimized document
+Once the status is `DONE`, retrieve your optimized file:
+
+<Card
+  title="Download results"
+  icon="download"
+  href="/guides/downloading-results"
+>
+  Get a presigned download URL for your optimized document
 </Card>

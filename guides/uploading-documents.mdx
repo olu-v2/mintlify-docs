@@ -3,18 +3,18 @@ title: Uploading documents
 description: Learn how to upload documents using presigned URLs
 ---
 
-The Doc Optimizer Server uses presigned S3 URLs for secure document uploads. This approach allows you to upload files directly to S3 without exposing AWS credentials.
+The Doc Optimizer API uses presigned S3 URLs for secure document uploads. This approach allows you to upload files directly to S3 without exposing AWS credentials.
 
 ## How it works
 
-The upload process follows these steps:
-
 <Steps>
   <Step title="Request a presigned URL">
-    Call the `/api/upload-url` endpoint with your document's content type and desired optimization level.
+    Call the `/api/upload-url` endpoint with your document's content type and
+    desired optimization level.
   </Step>
   <Step title="Upload your file">
-    Use the presigned URL to upload your document directly to S3 via a PUT request.
+    Use the presigned URL to upload your document directly to S3 via a PUT
+    request.
   </Step>
   <Step title="Start processing">
     Use the returned `jobId` and `key` to initiate document processing.
@@ -23,14 +23,15 @@ The upload process follows these steps:
 
 ## Request a presigned URL
 
-Send a POST request to `/api/upload-url` with the following parameters:
+Send a POST request to `/api/upload-url`:
 
 <ParamField path="contentType" type="string" required>
-  The MIME type of your document (e.g., `application/pdf`)
+  The MIME type of your document. Accepted values: - `application/pdf` -
+  `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
 </ParamField>
 
 <ParamField path="optimizationLevel" type="string" required>
-  The optimization level: `low`, `medium`, or `high`
+  The compression level: `low`, `medium`, or `high`
 </ParamField>
 
 ### Example request
@@ -49,100 +50,161 @@ curl -X POST https://your-api.com/api/upload-url \
 
 ```json
 {
-  "uploadUrl": "https://s3.amazonaws.com/bucket/uploads/original/abc-123?signature=...",
-  "key": "uploads/original/abc-123",
-  "jobId": "abc-123"
+  "success": true,
+  "data": {
+    "uploadUrl": "https://s3.amazonaws.com/bucket/uploads/original/abc-123.pdf?signature=...",
+    "key": "uploads/original/abc-123.pdf",
+    "jobId": "abc-123"
+  },
+  "timestamp": "2026-03-07T10:00:00.000Z"
 }
 ```
 
-<Note>
-  The presigned URL expires after 60 seconds. Upload your file immediately after receiving the URL.
-</Note>
+<Warning>
+  The presigned upload URL expires after **5 minutes (300 seconds)**. Upload
+  your file immediately after receiving the URL.
+</Warning>
+
+<Warning>
+  The `Content-Type` header on your PUT request must exactly match the
+  `contentType` you provided when requesting the presigned URL. A mismatch will
+  cause S3 to reject the upload.
+</Warning>
 
 ## Upload your document
 
-Use the `uploadUrl` from the previous response to upload your file:
+Use the `uploadUrl` from the response to PUT your file directly to S3:
 
 ```bash
-curl -X PUT "https://s3.amazonaws.com/bucket/uploads/original/abc-123?signature=..." \
+curl -X PUT "https://s3.amazonaws.com/bucket/uploads/original/abc-123.pdf?signature=..." \
   -H "Content-Type: application/pdf" \
   --data-binary @document.pdf
 ```
 
-<Warning>
-  Make sure the `Content-Type` header matches the content type you specified when requesting the presigned URL.
-</Warning>
+A successful upload returns HTTP `200` with no body. Any non-200 response from S3 means the upload failed — re-request a presigned URL and try again.
 
-## Using JavaScript
-
-Here's a complete example using JavaScript:
+## JavaScript example
 
 ```javascript
-// Step 1: Request presigned URL
-const response = await fetch('https://your-api.com/api/upload-url', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'x-api-key': 'your-api-key'
-  },
-  body: JSON.stringify({
-    contentType: 'application/pdf',
-    optimizationLevel: 'medium'
-  })
-});
+const API_BASE = "https://your-api.com/api";
+const API_KEY = "your-api-key";
 
-const { uploadUrl, jobId, key } = await response.json();
+async function requestUploadUrl(file, optimizationLevel) {
+  const response = await fetch(`${API_BASE}/upload-url`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY,
+    },
+    body: JSON.stringify({
+      contentType: file.type,
+      optimizationLevel,
+    }),
+  });
 
-// Step 2: Upload the file
-const file = document.getElementById('fileInput').files[0];
-await fetch(uploadUrl, {
-  method: 'PUT',
-  headers: {
-    'Content-Type': 'application/pdf'
-  },
-  body: file
-});
+  if (!response.ok) {
+    const { error } = await response.json();
+    throw new Error(error.message);
+  }
 
-console.log('Upload complete! Job ID:', jobId);
+  const { data } = await response.json();
+  return data; // { uploadUrl, key, jobId }
+}
+
+async function uploadFileToS3(uploadUrl, file) {
+  const response = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+
+  if (!response.ok) {
+    throw new Error("S3 upload failed. Request a new upload URL and retry.");
+  }
+}
+
+// Usage
+const file = document.getElementById("fileInput").files[0];
+const { uploadUrl, key, jobId } = await requestUploadUrl(file, "medium");
+await uploadFileToS3(uploadUrl, file);
+console.log("Upload complete! Job ID:", jobId);
 ```
 
-## Using Python
+## Python example
 
 ```python
 import requests
 
-# Step 1: Request presigned URL
-response = requests.post(
-    'https://your-api.com/api/upload-url',
-    headers={'x-api-key': 'your-api-key'},
-    json={
-        'contentType': 'application/pdf',
-        'optimizationLevel': 'medium'
-    }
-)
+API_BASE = 'https://your-api.com/api'
+API_KEY = 'your-api-key'
 
-data = response.json()
-upload_url = data['uploadUrl']
-job_id = data['jobId']
-
-# Step 2: Upload the file
-with open('document.pdf', 'rb') as f:
-    requests.put(
-        upload_url,
-        headers={'Content-Type': 'application/pdf'},
-        data=f
+def request_upload_url(file_path, content_type, optimization_level):
+    response = requests.post(
+        f'{API_BASE}/upload-url',
+        headers={'x-api-key': API_KEY},
+        json={
+            'contentType': content_type,
+            'optimizationLevel': optimization_level,
+        }
     )
+    response.raise_for_status()
+    return response.json()['data']  # { uploadUrl, key, jobId }
 
-print(f'Upload complete! Job ID: {job_id}')
+def upload_file_to_s3(upload_url, file_path, content_type):
+    with open(file_path, 'rb') as f:
+        response = requests.put(
+            upload_url,
+            headers={'Content-Type': content_type},
+            data=f,
+        )
+    if not response.ok:
+        raise Exception('S3 upload failed. Request a new upload URL and retry.')
+
+# Usage
+data = request_upload_url('document.pdf', 'application/pdf', 'medium')
+upload_file_to_s3(data['uploadUrl'], 'document.pdf', 'application/pdf')
+print(f"Upload complete! Job ID: {data['jobId']}")
 ```
+
+## Error handling
+
+<ResponseField name="400" type="Bad Request">
+  Missing or invalid parameters:
+
+```json
+{
+  "success": false,
+  "error": {
+    "message": "optimizationLevel must be low, medium, or high",
+    "code": "INVALID_OPTIMIZATION_LEVEL"
+  },
+  "timestamp": "2026-03-07T10:00:00.000Z"
+}
+```
+
+</ResponseField>
+
+<ResponseField name="401" type="Unauthorized">
+  Missing API key in the `x-api-key` header.
+</ResponseField>
+
+<ResponseField name="403" type="Forbidden">
+  Invalid, inactive, or expired API key.
+</ResponseField>
+
+<ResponseField name="500" type="Server Error">
+  Failed to generate the upload URL. Retry after a short delay.
+</ResponseField>
 
 ## Next steps
 
-After uploading your document, you can:
-
 <CardGroup cols={2}>
-  <Card title="Start processing" icon="gear" href="/guides/processing-documents">
-    Learn how to initiate document optimization
+  <Card
+    title="Start processing"
+    icon="gear"
+    href="/guides/processing-documents"
+  >
+    Initiate document optimization using your jobId and key
   </Card>
   <Card title="Check status" icon="clock" href="/guides/checking-status">
     Monitor your processing job

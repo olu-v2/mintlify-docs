@@ -3,28 +3,23 @@ title: Processing documents
 description: Learn how to start document processing with different optimization levels
 ---
 
-Once you've uploaded a document, you can initiate the optimization process. The Doc Optimizer Server supports three optimization levels, each balancing file size and quality differently.
+Once you've uploaded a document to S3, call the `/api/process` endpoint to trigger optimization. Processing runs asynchronously — the endpoint returns immediately and the job runs in the background.
 
 ## Optimization levels
 
-<CardGroup cols={3}>
-  <Card title="Low" icon="gauge-simple-low">
-    Minimal compression with maximum quality preservation. Best for documents where quality is critical.
-  </Card>
-  <Card title="Medium" icon="gauge-simple">
-    Balanced compression and quality. Recommended for most use cases.
-  </Card>
-  <Card title="High" icon="gauge-simple-high">
-    Maximum compression with acceptable quality loss. Ideal for large files where size is a priority.
-  </Card>
-</CardGroup>
+| Level    | iLovePDF mapping | Description                                               |
+| -------- | ---------------- | --------------------------------------------------------- |
+| `low`    | `low`            | Minimal compression, maximum quality preserved            |
+| `medium` | `recommended`    | Balanced compression and quality. Best for most use cases |
+| `high`   | `extreme`        | Maximum compression, smallest file size                   |
 
 ## Start processing
 
-To begin processing your uploaded document, send a POST request to `/api/process`:
+Send a POST request to `/api/process`:
 
 <ParamField path="key" type="string" required>
-  The S3 key returned from the upload URL request (e.g., `uploads/original/abc-123`)
+  The S3 key returned from the `/api/upload-url` response (e.g.
+  `uploads/original/abc-123.pdf`)
 </ParamField>
 
 <ParamField path="optimizationLevel" type="string" required>
@@ -32,7 +27,7 @@ To begin processing your uploaded document, send a POST request to `/api/process
 </ParamField>
 
 <ParamField path="jobId" type="string" required>
-  The job ID returned from the upload URL request
+  The job ID returned from the `/api/upload-url` response
 </ParamField>
 
 ### Example request
@@ -42,7 +37,7 @@ curl -X POST https://your-api.com/api/process \
   -H "Content-Type: application/json" \
   -H "x-api-key: your-api-key" \
   -d '{
-    "key": "uploads/original/abc-123",
+    "key": "uploads/original/abc-123.pdf",
     "optimizationLevel": "medium",
     "jobId": "abc-123"
   }'
@@ -52,85 +47,61 @@ curl -X POST https://your-api.com/api/process \
 
 ```json
 {
-  "message": "Processing started",
-  "jobId": "abc-123"
+  "success": true,
+  "data": {
+    "message": "Processing started",
+    "jobId": "abc-123"
+  },
+  "timestamp": "2026-03-07T10:00:00.000Z"
 }
 ```
 
 <Info>
-  The job status will be updated to `PENDING` when processing begins. Processing time varies based on document size and optimization level.
+  After a successful call, the job status transitions to `PENDING`, then
+  `PROCESSING` as the Lambda begins working. Poll the `/api/status/:jobId`
+  endpoint to track progress.
 </Info>
 
-## Complete workflow example
+<Warning>
+  Always upload your file to S3 **before** calling `/api/process`. Processing
+  will fail if the file does not exist at the specified `key`.
+</Warning>
 
-Here's how to combine upload and processing in a single workflow:
-
-<Steps>
-  <Step title="Request upload URL">
-    Specify your content type and optimization level
-  </Step>
-  <Step title="Upload the file">
-    Use the presigned URL to upload your document
-  </Step>
-  <Step title="Start processing">
-    Initiate optimization using the returned `key` and `jobId`
-  </Step>
-  <Step title="Monitor progress">
-    Poll the status endpoint to track processing
-  </Step>
-</Steps>
-
-### JavaScript example
+## JavaScript example
 
 ```javascript
-const API_BASE = 'https://your-api.com/api';
-const API_KEY = 'your-api-key';
+const API_BASE = "https://your-api.com/api";
+const API_KEY = "your-api-key";
 
-async function processDocument(file, optimizationLevel) {
-  // Step 1: Get upload URL
-  const urlResponse = await fetch(`${API_BASE}/upload-url`, {
-    method: 'POST',
+async function startProcessing(key, optimizationLevel, jobId) {
+  const response = await fetch(`${API_BASE}/process`, {
+    method: "POST",
     headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY
+      "Content-Type": "application/json",
+      "x-api-key": API_KEY,
     },
-    body: JSON.stringify({
-      contentType: file.type,
-      optimizationLevel
-    })
+    body: JSON.stringify({ key, optimizationLevel, jobId }),
   });
-  
-  const { uploadUrl, key, jobId } = await urlResponse.json();
-  
-  // Step 2: Upload file
-  await fetch(uploadUrl, {
-    method: 'PUT',
-    headers: { 'Content-Type': file.type },
-    body: file
-  });
-  
-  // Step 3: Start processing
-  const processResponse = await fetch(`${API_BASE}/process`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': API_KEY
-    },
-    body: JSON.stringify({ key, optimizationLevel, jobId })
-  });
-  
-  const result = await processResponse.json();
-  console.log('Processing started:', result.jobId);
-  
-  return jobId;
+
+  if (!response.ok) {
+    const { error } = await response.json();
+    throw new Error(error.message);
+  }
+
+  const { data } = await response.json();
+  return data.jobId;
 }
 
 // Usage
-const fileInput = document.getElementById('file');
-const jobId = await processDocument(fileInput.files[0], 'medium');
+const jobId = await startProcessing(
+  "uploads/original/abc-123.pdf",
+  "medium",
+  "abc-123",
+);
+console.log("Processing started for job:", jobId);
 ```
 
-### Python example
+## Python example
 
 ```python
 import requests
@@ -138,85 +109,74 @@ import requests
 API_BASE = 'https://your-api.com/api'
 API_KEY = 'your-api-key'
 
-def process_document(file_path, optimization_level):
-    headers = {'x-api-key': API_KEY}
-    
-    # Step 1: Get upload URL
-    url_response = requests.post(
-        f'{API_BASE}/upload-url',
-        headers=headers,
+def start_processing(key, optimization_level, job_id):
+    response = requests.post(
+        f'{API_BASE}/process',
+        headers={'x-api-key': API_KEY},
         json={
-            'contentType': 'application/pdf',
-            'optimizationLevel': optimization_level
+            'key': key,
+            'optimizationLevel': optimization_level,
+            'jobId': job_id,
         }
     )
-    
-    data = url_response.json()
-    upload_url = data['uploadUrl']
-    key = data['key']
-    job_id = data['jobId']
-    
-    # Step 2: Upload file
-    with open(file_path, 'rb') as f:
-        requests.put(
-            upload_url,
-            headers={'Content-Type': 'application/pdf'},
-            data=f
-        )
-    
-    # Step 3: Start processing
-    process_response = requests.post(
-        f'{API_BASE}/process',
-        headers=headers,
-        json={'key': key, 'optimizationLevel': optimization_level, 'jobId': job_id}
-    )
-    
-    result = process_response.json()
-    print(f"Processing started: {result['jobId']}")
-    
-    return job_id
+    response.raise_for_status()
+    return response.json()['data']['jobId']
 
 # Usage
-job_id = process_document('document.pdf', 'medium')
+job_id = start_processing('uploads/original/abc-123.pdf', 'medium', 'abc-123')
+print(f'Processing started for job: {job_id}')
 ```
-
-<Warning>
-  Make sure to upload your file before calling the `/api/process` endpoint. The processing will fail if the file doesn't exist at the specified S3 key.
-</Warning>
 
 ## Error handling
 
-The API returns standard HTTP status codes:
+<ResponseField name="400" type="Bad Request">
+  Missing or invalid parameters:
 
-- `200`: Processing started successfully
-- `400`: Missing required parameters
-- `500`: Server error during processing
-
-Always check the response status and handle errors appropriately:
-
-```javascript
-const response = await fetch(`${API_BASE}/process`, {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'x-api-key': API_KEY
+```json
+{
+  "success": false,
+  "error": {
+    "message": "Missing parameters: key, optimizationLevel, jobId",
+    "code": "MISSING_PARAMETERS"
   },
-  body: JSON.stringify({ key, optimizationLevel, jobId })
-});
-
-if (!response.ok) {
-  const error = await response.json();
-  throw new Error(`Processing failed: ${error.error}`);
+  "timestamp": "2026-03-07T10:00:00.000Z"
 }
 ```
+
+</ResponseField>
+
+<ResponseField name="401" type="Unauthorized">
+  Missing API key in the `x-api-key` header.
+</ResponseField>
+
+<ResponseField name="403" type="Forbidden">
+  Invalid, inactive, or expired API key.
+</ResponseField>
+
+<ResponseField name="500" type="Server Error">
+  ```json
+  {
+    "success": false,
+    "error": {
+      "message": "Processing failed to start",
+      "code": "PROCESSING_FAILED"
+    },
+    "timestamp": "2026-03-07T10:00:00.000Z"
+  }
+  ```
+</ResponseField>
 
 ## Next steps
 
 <CardGroup cols={2}>
   <Card title="Check status" icon="clock" href="/guides/checking-status">
-    Learn how to monitor your processing job
+    Poll for job completion
   </Card>
-  <Card title="Download results" icon="download" href="/guides/downloading-results">
+  <Card
+    title="Download results"
+    icon="download"
+    href="/guides/downloading-results"
+  >
     Retrieve your optimized document
   </Card>
 </CardGroup>
